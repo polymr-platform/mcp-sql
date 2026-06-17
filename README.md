@@ -11,7 +11,7 @@ It is part of the [polymr platform](https://polymr-platform.github.io/).
 
 For example if database writing is not automatically approved, you can get a preview showing you exactly what change the LLM wants to do.
 
-![SQL approval request](assets/sql-approval-request.png)
+![SQL approval request](assets/approval-request-example.png)
 
 3) Can define multiple jdbc connections (with pooling), can use policy to dynamically switch one is the default, allowing easy environmental switching.
 
