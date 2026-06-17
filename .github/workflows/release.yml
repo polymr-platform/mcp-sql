@@ -26,8 +26,9 @@ jobs:
       - name: Setup GraalVM
         uses: graalvm/setup-graalvm@v1
         with:
-          java-version: "23"
+          java-version: "21"
           distribution: "graalvm-community"
+          components: "native-image"
           cache: maven
 
       - name: Configure Maven toolchains
