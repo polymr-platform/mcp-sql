@@ -13,7 +13,7 @@ For example if database writing is not automatically approved, you can get a pre
 
 ![SQL approval request](assets/approval-request-example.png)
 
-3) Can define multiple jdbc connections (with pooling), can use policy to dynamically switch one is the default, allowing easy environmental switching.
+3) You can define multiple jdbc connections (with pooling), you can then use a policy to dynamically switch one is the default, allowing easy environmental switching.
 
 ![SQL approval request](assets/tag-example.png)
 ![SQL approval request](assets/tag-update-example.png)
