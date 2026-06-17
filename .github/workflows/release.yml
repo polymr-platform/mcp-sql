@@ -32,7 +32,12 @@ jobs:
 
       - name: Install native-image
         shell: bash
-        run: gu install native-image
+        run: |
+          if [[ "${{ runner.os }}" == "Windows" ]]; then
+            "${JAVA_HOME}\\bin\\gu.cmd" install native-image
+          else
+            "${JAVA_HOME}/bin/gu" install native-image
+          fi
 
       - name: Configure Maven toolchains
         shell: bash
