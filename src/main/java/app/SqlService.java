@@ -24,6 +24,7 @@ import java.sql.ResultSetMetaData;
 import java.sql.SQLException;
 import java.sql.Time;
 import java.sql.Timestamp;
+import java.sql.Types;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -34,6 +35,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.time.ZoneId;
 import java.security.PublicKey;
 import net.schmizz.sshj.common.KeyType;
 import net.schmizz.sshj.transport.verification.OpenSSHKnownHosts;
@@ -68,7 +70,7 @@ public final class SqlService {
 			applyParams(stmt, params);
 			applyStatementLimits(stmt, resolved.maxRows + 1, resolved.timeoutMs, null);
 			ResultSet resultSet = stmt.executeQuery();
-			return readResultSet(resultSet, resolved.maxRows, offset);
+			return readResultSet(resultSet, resolved.maxRows, offset, resolved.connectionConfig);
 		}
 	}
 
@@ -86,11 +88,11 @@ public final class SqlService {
 			applyStatementLimits(stmt, null, resolved.timeoutMs, null);
 			boolean hasResultSet = stmt.execute();
 			if (hasResultSet) {
-				ResultSet resultSet = stmt.getResultSet();
-				ObjectNode payload = readResultSet(resultSet, resolved.maxRows, null);
-				Integer actualRowCount = findNextUpdateCount(stmt);
-				if (actualRowCount != null) {
-					payload.put("rowCount", actualRowCount);
+					ResultSet resultSet = stmt.getResultSet();
+					ObjectNode payload = readResultSet(resultSet, resolved.maxRows, null, resolved.connectionConfig);
+					Integer actualRowCount = findNextUpdateCount(stmt);
+					if (actualRowCount != null) {
+						payload.put("rowCount", actualRowCount);
 				}
 				return payload;
 			}
@@ -125,7 +127,7 @@ public final class SqlService {
 			boolean hasResultSet = stmt.execute();
 			if (hasResultSet) {
 				ResultSet resultSet = stmt.getResultSet();
-				ObjectNode payload = readResultSet(resultSet, previewLimit, null);
+				ObjectNode payload = readResultSet(resultSet, previewLimit, null, resolved.connectionConfig);
 				Integer actualRowCount = findNextUpdateCount(stmt);
 				if (actualRowCount != null) {
 					payload.put("rowCount", actualRowCount);
@@ -190,7 +192,7 @@ public final class SqlService {
 			boolean hasResultSet = stmt.execute();
 			if (hasResultSet) {
 				ResultSet resultSet = stmt.getResultSet();
-				return readResultSet(resultSet, resolved.maxRows, null);
+				return readResultSet(resultSet, resolved.maxRows, null, resolved.connectionConfig);
 			}
 			ObjectNode payload = mapper.createObjectNode();
 			payload.put("success", true);
@@ -216,21 +218,24 @@ public final class SqlService {
 		}
 	}
 
-	private ObjectNode readResultSet(ResultSet resultSet, int maxRows, Integer offset) throws SQLException {
+	private ObjectNode readResultSet(ResultSet resultSet, int maxRows, Integer offset, Config.ConnectionConfig connectionConfig) throws SQLException {
 		ObjectNode payload = mapper.createObjectNode();
 		ArrayNode columns = payload.putArray("columns");
 		ResultSetMetaData meta = resultSet.getMetaData();
 		int columnCount = meta.getColumnCount();
+		int[] columnTypes = new int[columnCount];
 		for (int i = 1; i <= columnCount; i++) {
 			ObjectNode col = columns.addObject();
 			col.put("name", meta.getColumnLabel(i));
 			col.put("type", meta.getColumnTypeName(i));
 			col.put("nullable", meta.isNullable(i) != ResultSetMetaData.columnNoNulls);
+			columnTypes[i - 1] = meta.getColumnType(i);
 		}
 		ArrayNode rows = payload.putArray("rows");
 		int rowCount = 0;
 		int skipped = 0;
 		int targetOffset = offset == null ? 0 : Math.max(0, offset);
+		String timezone = resolveTimezone(connectionConfig);
 		while (resultSet.next()) {
 			if (skipped < targetOffset) {
 				skipped++;
@@ -239,7 +244,7 @@ public final class SqlService {
 			ArrayNode row = rows.addArray();
 			for (int i = 1; i <= columnCount; i++) {
 				Object value = resultSet.getObject(i);
-				row.add(mapper.valueToTree(normalizeValue(value)));
+				row.add(mapper.valueToTree(normalizeValue(value, columnTypes[i - 1], timezone)));
 			}
 			rowCount++;
 			if (rowCount >= maxRows) {
@@ -274,12 +279,16 @@ public final class SqlService {
 		}
 	}
 
-	private Object normalizeValue(Object value) {
+	private Object normalizeValue(Object value, int columnType, String timezone) {
 		if (value == null) {
 			return null;
 		}
 		if (value instanceof Timestamp timestamp) {
-			return timestamp.toInstant().toString();
+			if (columnType == Types.TIMESTAMP_WITH_TIMEZONE) {
+				return timestamp.toInstant().toString();
+			}
+			LocalDateTime local = timestamp.toLocalDateTime();
+			return formatLocalDateTime(local, timezone);
 		}
 		if (value instanceof java.sql.Date date) {
 			return date.toLocalDate().toString();
@@ -294,7 +303,10 @@ public final class SqlService {
 			return date.toString();
 		}
 		if (value instanceof LocalDateTime dateTime) {
-			return dateTime.toString();
+			if (columnType == Types.TIMESTAMP_WITH_TIMEZONE) {
+				return dateTime.toString();
+			}
+			return formatLocalDateTime(dateTime, timezone);
 		}
 		if (value instanceof OffsetDateTime dateTime) {
 			return dateTime.toString();
@@ -306,6 +318,24 @@ public final class SqlService {
 			return date.toInstant().toString();
 		}
 		return value;
+	}
+
+	private String resolveTimezone(Config.ConnectionConfig connectionConfig) {
+		if (connectionConfig != null && connectionConfig.timezone != null && !connectionConfig.timezone.isBlank()) {
+			return connectionConfig.timezone.trim();
+		}
+		if (config.timezone != null && !config.timezone.isBlank()) {
+			return config.timezone.trim();
+		}
+		return null;
+	}
+
+	private String formatLocalDateTime(LocalDateTime local, String timezone) {
+		if (timezone == null || timezone.isBlank()) {
+			return local.toString();
+		}
+		ZoneId zone = ZoneId.of(timezone);
+		return local.atZone(zone).toInstant().toString();
 	}
 
 	private void applyParams(PreparedStatement stmt, JsonNode params) throws SQLException, Config.ConfigException {
@@ -857,30 +887,38 @@ public final class SqlService {
 		}
 
 		static SqlType fromSql(String normalized) {
+			String keyword = firstKeyword(normalized);
+			if (keyword == null) {
+				return UNKNOWN;
+			}
+			return classifyKeyword(keyword);
+		}
+
+		static String firstKeyword(String normalized) {
 			SqlScanner scanner = new SqlScanner(normalized);
 			String keyword = scanner.nextKeyword();
 			if (keyword == null) {
-				return UNKNOWN;
+				return null;
 			}
 			if (keyword.equals("with")) {
 				keyword = scanner.keywordAfterWith();
 				if (keyword == null) {
-					return UNKNOWN;
+					return null;
 				}
 			}
 			if (keyword.equals("explain")) {
 				keyword = scanner.keywordAfterExplain();
 				if (keyword == null) {
-					return UNKNOWN;
+					return null;
 				}
 				if (keyword.equals("with")) {
 					keyword = scanner.keywordAfterWith();
 					if (keyword == null) {
-						return UNKNOWN;
+						return null;
 					}
 				}
 			}
-			return classifyKeyword(keyword);
+			return keyword;
 		}
 
 		private static SqlType classifyKeyword(String keyword) {
@@ -932,6 +970,16 @@ public final class SqlService {
 				}
 				if (next.equals("as")) {
 					skipSpaceAndComments();
+					if (consumeKeyword("not")) {
+						skipSpaceAndComments();
+						if (!consumeKeyword("materialized")) {
+							return null;
+						}
+						skipSpaceAndComments();
+					}
+					else if (consumeKeyword("materialized")) {
+						skipSpaceAndComments();
+					}
 					if (!consumeChar('(')) {
 						return null;
 					}
@@ -1133,6 +1181,19 @@ public final class SqlService {
 			return text.substring(start, index);
 		}
 
+		private boolean consumeKeyword(String expected) {
+			skipSpaceAndComments();
+			int end = index + expected.length();
+			if (end > text.length() || !text.regionMatches(index, expected, 0, expected.length())) {
+				return false;
+			}
+			if (end < text.length() && (Character.isLetterOrDigit(text.charAt(end)) || text.charAt(end) == '_')) {
+				return false;
+			}
+			index = end;
+			return true;
+		}
+		
 		private boolean consumeChar(char expected) {
 			skipSpaceAndComments();
 			if (index < text.length() && text.charAt(index) == expected) {

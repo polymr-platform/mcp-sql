@@ -36,6 +36,7 @@ public final class ConfigSchema {
 		connectionProps.putObject("username").put("type", "string").put("description", "Database username.");
 		connectionProps.putObject("password").put("type", "string").put("description", "Database password.").put("audience", "human");
 		connectionProps.putObject("password_env").put("type", "string").put("description", "Environment variable containing the password.").put("audience", "human");
+		connectionProps.putObject("timezone").put("type", "string").put("description", "Timezone used to interpret timestamp values without timezone in this connection (database timezone)." );
 		connectionProps.putObject("default_schema").put("type", "string").put("description", "Default schema for the connection.");
 		connectionProps.set("allowed_schemas", stringListSchema(mapper, "Schema allowlist for this connection."));
 		connectionProps.putObject("catalog").put("type", "string").put("description", "Default catalog for the connection.");
@@ -74,6 +75,10 @@ public final class ConfigSchema {
 		ObjectNode defaultConn = props.putObject("default_connection");
 		defaultConn.put("type", "string");
 		defaultConn.put("description", "Default connection name used when a tool call omits it.");
+
+		ObjectNode timezone = props.putObject("timezone");
+		timezone.put("type", "string");
+		timezone.put("description", "Default timezone used to interpret timestamp values without timezone (database timezone). Overridden by connections[].timezone.");
 
 		ObjectNode query = props.putObject("query");
 		query.put("type", "object");

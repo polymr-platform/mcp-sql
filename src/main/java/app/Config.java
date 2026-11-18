@@ -1,6 +1,7 @@
 package app;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -12,12 +13,14 @@ import java.util.Map;
 public final class Config {
 	public List<ConnectionConfig> connections;
 	public String defaultConnection;
+	public String timezone;
 	public QueryDefaults query;
 	public IntrospectDefaults introspect;
 
 	public Config() {
 		this.connections = new ArrayList<>();
 		this.defaultConnection = null;
+		this.timezone = null;
 		this.query = QueryDefaults.defaultDefaults();
 		this.introspect = IntrospectDefaults.defaultDefaults();
 	}
@@ -28,6 +31,7 @@ public final class Config {
 			this.connections.add(new ConnectionConfig(connection));
 		}
 		this.defaultConnection = other.defaultConnection;
+		this.timezone = other.timezone;
 		this.query = new QueryDefaults(other.query);
 		this.introspect = new IntrospectDefaults(other.introspect);
 	}
@@ -52,6 +56,7 @@ public final class Config {
 			switch (key) {
 				case "connections" -> next.connections = parseConnections(node);
 				case "default_connection" -> next.defaultConnection = readOptionalString(node, "default_connection");
+				case "timezone" -> next.timezone = readOptionalTimezone(node, "timezone");
 				case "query" -> next.query = next.query.applyOverride(node);
 				case "introspect" -> next.introspect = next.introspect.applyOverride(node);
 				default -> throw new ConfigException("unknown config key: " + key);
@@ -108,6 +113,7 @@ public final class Config {
 		public String username;
 		public String password;
 		public String passwordEnv;
+		public String timezone;
 		public String defaultSchema;
 		public List<String> allowedSchemas;
 		public String catalog;
@@ -121,6 +127,7 @@ public final class Config {
 			this.username = null;
 			this.password = null;
 			this.passwordEnv = null;
+			this.timezone = null;
 			this.defaultSchema = null;
 			this.allowedSchemas = new ArrayList<>();
 			this.catalog = null;
@@ -135,6 +142,7 @@ public final class Config {
 			this.username = other.username;
 			this.password = other.password;
 			this.passwordEnv = other.passwordEnv;
+			this.timezone = other.timezone;
 			this.defaultSchema = other.defaultSchema;
 			this.allowedSchemas = new ArrayList<>(other.allowedSchemas);
 			this.catalog = other.catalog;
@@ -156,6 +164,7 @@ public final class Config {
 					case "username" -> connection.username = readOptionalString(value, "username");
 					case "password" -> connection.password = readOptionalString(value, "password");
 					case "password_env" -> connection.passwordEnv = readOptionalString(value, "password_env");
+					case "timezone" -> connection.timezone = readOptionalTimezone(value, "timezone");
 				case "default_schema" -> connection.defaultSchema = readOptionalString(value, "default_schema");
 				case "allowed_schemas" -> connection.allowedSchemas = readStringList(value, "allowed_schemas");
 				case "catalog" -> connection.catalog = readOptionalString(value, "catalog");
@@ -590,6 +599,19 @@ public final class Config {
 			return null;
 		}
 		return text.trim();
+	}
+
+	private static String readOptionalTimezone(JsonNode node, String name) throws ConfigException {
+		String value = readOptionalString(node, name);
+		if (value == null) {
+			return null;
+		}
+		try {
+			ZoneId.of(value);
+		} catch (Exception e) {
+			throw new ConfigException(name + " must be a valid timezone ID");
+		}
+		return value;
 	}
 
 	private static boolean readBoolean(JsonNode node, String name) throws ConfigException {

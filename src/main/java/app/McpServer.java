@@ -18,6 +18,7 @@ import java.nio.charset.StandardCharsets;
 import java.sql.Connection;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 
 public final class McpServer {
 	private final ObjectMapper mapper = new ObjectMapper();
@@ -483,7 +484,7 @@ public final class McpServer {
 		StringBuilder html = new StringBuilder();
 		html.append("<!doctype html><html><head><meta charset=\"utf-8\"/>");
 		html.append("<style>");
-		html.append("body{font-family:var(--font-sans, 'Anthropic Sans', sans-serif);background:var(--color-background-tertiary,#faf9f5);color:var(--color-text-primary,#141413);margin:0;padding:24px;}" );
+		html.append("body{font-family:var(--font-sans, 'Anthropic Sans', sans-serif);background:var(--color-background-tertiary,#faf9f5);color:var(--color-text-primary,#141413);margin:0;width:fit-content;}" );
 		html.append(".card{background:var(--color-background-primary,#fff);border:1px solid var(--color-border-primary,rgba(31,30,29,0.4));border-radius:var(--border-radius-xl,12px);padding:18px;box-shadow:var(--shadow-lg,0 10px 15px -3px rgba(0,0,0,0.1), 0 4px 6px -4px rgba(0,0,0,0.1));}" );
 		html.append(".headline{font-family:var(--font-sans, 'Anthropic Sans', sans-serif);font-size:var(--font-heading-lg-size,20px);line-height:var(--font-heading-lg-line-height,1.25);margin:0 0 6px;}" );
 		html.append(".metric{font-weight:var(--font-weight-semibold,600);color:var(--color-text-primary,#141413);}" );
@@ -570,9 +571,11 @@ public final class McpServer {
 		if (sql == null) {
 			return "Affected";
 		}
-		String normalized = sql.trim().toLowerCase();
-		int index = normalized.indexOf(' ');
-		String keyword = index < 0 ? normalized : normalized.substring(0, index);
+		String normalized = sql.trim().toLowerCase(Locale.ROOT);
+		String keyword = SqlService.SqlType.firstKeyword(normalized);
+		if (keyword == null) {
+			return "Affected";
+		}
 		return switch (keyword) {
 			case "insert" -> "Inserted";
 			case "update" -> "Updated";
